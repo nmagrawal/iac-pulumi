@@ -1,0 +1,4 @@
+encryptionsalt: v1:mXGukmWehTo=:v1:ajVU7Mzcpn1Y0Dtp:A5Vyzh/JjoNLHB4osmGPunD8LYFquA==
+config:
+  aws:region: us-west-1
+  aws:profile: dev
