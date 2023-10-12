@@ -2,12 +2,25 @@
 
 import pulumi
 import pulumi_aws as aws
+import ipaddress
 
+def calculate_subnets(vpc_cidr, num_subnets):
+    try:
+        vpc_network = ipaddress.IPv4Network(vpc_cidr)
+    except ValueError:
+        print("Invalid VPC CIDR format. Example format: 10.0.0.0/16")
+        return []
+
+    subnet_bits = vpc_network.max_prefixlen - num_subnets
+
+    subnets = list(vpc_network.subnets(new_prefix=subnet_bits))
+    
+    return subnets
 # Load Pulumi config
 config = pulumi.Config()
 
 # Get region and CIDR block from config
-vpc_cidr = config.require("cidr")
+vpc_cidr = config.require("vpc_cidr")
 aws_config = pulumi.Config("aws")
 region = aws_config.get("region")
 vpc_name = config.require("vpc_name")
@@ -17,7 +30,7 @@ route_table_name = config.require("route_table_name")
 
 # Create VPC
 vpc = aws.ec2.Vpc(vpc_name,
-    cidr_block="10.0.0.0/16",
+    cidr_block=vpc_cidr,
     instance_tenancy="default",
     tags={
         "Name": vpc_name,
@@ -36,6 +49,7 @@ zones = aws.get_availability_zones(state="available")
 # Determining the number of subnets to create
 no_of_subnets = min(3, len(zones.names)) * 2
 
+subnet_cidrs = calculate_subnets(vpc_cidr, no_of_subnets)
 subnet_ids = []
 for i in range(no_of_subnets):
     # Determining subnet type
@@ -44,7 +58,7 @@ for i in range(no_of_subnets):
     # Create subnet
     subnet = aws.ec2.Subnet(f"{subnet_name}_{subnet_type}_{i}",
         vpc_id=vpc.id,
-        cidr_block=f"10.0.{i}.0/24",
+        cidr_block=str(subnet_cidrs[i]),
         availability_zone=zones.names[i % (no_of_subnets // 2)],
         map_public_ip_on_launch=i < no_of_subnets // 2,
         tags={
@@ -81,3 +95,4 @@ pulumi.export("vpcId", vpc.id)
 pulumi.export("igId", ig.id)
 pulumi.export("publicRTId", public_rt.id)
 pulumi.export("privateRTId", private_rt.id)
+pulumi.export("subnets", subnet_ids)

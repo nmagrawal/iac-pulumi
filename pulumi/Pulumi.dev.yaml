@@ -1,8 +1,8 @@
 encryptionsalt: v1:mXGukmWehTo=:v1:ajVU7Mzcpn1Y0Dtp:A5Vyzh/JjoNLHB4osmGPunD8LYFquA==
 config:
   aws:profile: dev
-  aws:region: us-east-1
-  iac-pulumi:cidr: 10.0.0.0/16
+  aws:region: us-west-1
+  iac-pulumi:vpc_cidr: 10.0.0.0/16
   iac-pulumi:vpc_name: iac-pulumi-dev
   iac-pulumi:internet_gateway_name: iac-pulumi-dev-igw
   iac-pulumi:subnet_name: iac-pulumi-dev-subnet
