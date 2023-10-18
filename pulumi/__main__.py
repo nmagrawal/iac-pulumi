@@ -3,6 +3,8 @@
 import pulumi
 import pulumi_aws as aws
 import ipaddress
+from pulumi_aws import ec2
+
 
 def calculate_subnets(vpc_cidr, num_subnets):
     try:
@@ -27,6 +29,15 @@ vpc_name = config.require("vpc_name")
 internet_gateway_name = config.require("internet_gateway_name")
 subnet_name = config.require("subnet_name")
 route_table_name = config.require("route_table_name")
+ipv4_cidr_block = config.require("ipv4_cidr_block")
+ipv6_cidr_block = config.require("ipv6_cidr_block")
+ami_id = config.require("ami_id")
+key_name = config.require("key_name")
+webapp_instance_name = config.require("webapp_instance_name")
+webapp_instance_type = config.require("webapp_instance_type")
+webapp_root_volume_size = config.require("webapp_root_volume_size")
+webapp_root_volume_type = config.require("webapp_root_volume_type")
+
 
 # Create VPC
 vpc = aws.ec2.Vpc(vpc_name,
@@ -66,6 +77,8 @@ for i in range(no_of_subnets):
     })  # map public IP if public subnet
     subnet_ids.append((subnet.id, subnet_type))
 
+public_subnets = [subnet_id for subnet_id, subnet_type in subnet_ids if subnet_type == "public"]
+
 # Create public and private route tables
 public_rt = aws.ec2.RouteTable(f"{route_table_name}_public",
     vpc_id=vpc.id,
@@ -91,8 +104,84 @@ for i, (subnet_id, subnet_type) in enumerate(subnet_ids):
         route_table_id=rt_id,
         subnet_id=subnet_id)
 
+# Create a new security group
+app_security_group = ec2.SecurityGroup("appSecurityGroup",
+    description="Security group for the application",
+    vpc_id = vpc.id,
+    ingress=[
+        # SSH
+        ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=22,
+            to_port=22,
+            cidr_blocks=[
+                ipv4_cidr_block
+            ],
+            ipv6_cidr_blocks=[
+                ipv6_cidr_block
+            ]
+        ),
+        # HTTP
+        ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=80,
+            to_port=80,
+            cidr_blocks=[
+                ipv4_cidr_block
+            ],
+            ipv6_cidr_blocks=[
+                ipv6_cidr_block
+            ]
+        ),
+        # HTTPS
+        ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=443,
+            to_port=443,
+            cidr_blocks=[
+                ipv4_cidr_block
+            ],
+            ipv6_cidr_blocks=[
+                ipv6_cidr_block
+            ]
+        ),
+        # Application port
+        ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=8080,
+            to_port=8080,
+            cidr_blocks=[
+                ipv4_cidr_block
+            ],
+            ipv6_cidr_blocks=[
+                ipv6_cidr_block
+            ]
+        ),
+    ])
+
+ec2_instance = ec2.Instance('ec2_instance',
+                            ami=ami_id,  # Amazon Machine Image
+                            instance_type=webapp_instance_type,  # Default instance type
+                            subnet_id=public_subnets[0],  # Subnet ID
+                            key_name=key_name,  # SSH key name
+                            vpc_security_group_ids=[app_security_group.id],  # Security Group
+                            root_block_device=ec2.InstanceRootBlockDeviceArgs(
+                                volume_type=webapp_root_volume_type,  
+                                volume_size=webapp_root_volume_size,  
+                                delete_on_termination=True  # Terminate EBS volume on instance termination
+                            ),
+                            disable_api_termination=False,
+                            tags= {
+                                "Name": webapp_instance_name
+                            }
+                            )
+
+# Export the name of the EC2 instance
+pulumi.export('ec2_instance_name', ec2_instance.id)
+# Export
 pulumi.export("vpcId", vpc.id)
 pulumi.export("igId", ig.id)
 pulumi.export("publicRTId", public_rt.id)
 pulumi.export("privateRTId", private_rt.id)
 pulumi.export("subnets", subnet_ids)
+pulumi.export("appSecurityGroupId", app_security_group.id)
