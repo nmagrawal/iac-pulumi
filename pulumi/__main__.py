@@ -104,6 +104,9 @@ for i, (subnet_id, subnet_type) in enumerate(subnet_ids):
 app_security_group = ec2.SecurityGroup("appSecurityGroup",
     description="Security group for the application",
     vpc_id = vpc.id,
+    tags={
+        "Name": "application security group"
+    },
     ingress=[
         # SSH
         ec2.SecurityGroupIngressArgs(
