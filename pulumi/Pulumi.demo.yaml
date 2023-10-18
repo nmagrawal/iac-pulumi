@@ -1,6 +1,6 @@
-encryptionsalt: v1:SLTYi7aHDG8=:v1:Q50YEw/yaW3+alf6:ISciOCdN6CD9HtgkjQjPnvK6/Ikmzg==
+encryptionsalt: v1:HMdW2wYhr94=:v1:WITX3og2SGhau+lg:z+wSTgHi+HIsenbuERNHR8Unp3ieRg==
 config:
-  aws:profile: dev
+  aws:profile: demo
   aws:region: us-east-1
   vpc_cidr: 10.0.0.0/16
   ipv4_cidr_block: 0.0.0.0/0
@@ -10,7 +10,7 @@ config:
   subnet_name: iac-pulumi-dev-subnet
   route_table_name: iac-pulumi-dev-rt
   ami_id: ami-082a7e07bb2d0ef23
-  key_name: webappInstances
+  key_name: demoinstance
   webapp:
     name: webapp
     instance_type: t2.micro

@@ -33,11 +33,7 @@ ipv4_cidr_block = config.require("ipv4_cidr_block")
 ipv6_cidr_block = config.require("ipv6_cidr_block")
 ami_id = config.require("ami_id")
 key_name = config.require("key_name")
-webapp_instance_name = config.require("webapp_instance_name")
-webapp_instance_type = config.require("webapp_instance_type")
-webapp_root_volume_size = config.require("webapp_root_volume_size")
-webapp_root_volume_type = config.require("webapp_root_volume_type")
-
+webapp = config.require_object("webapp")
 
 # Create VPC
 vpc = aws.ec2.Vpc(vpc_name,
@@ -115,7 +111,7 @@ app_security_group = ec2.SecurityGroup("appSecurityGroup",
             from_port=22,
             to_port=22,
             cidr_blocks=[
-                ipv4_cidr_block
+                 ipv4_cidr_block
             ],
             ipv6_cidr_blocks=[
                 ipv6_cidr_block
@@ -161,18 +157,18 @@ app_security_group = ec2.SecurityGroup("appSecurityGroup",
 
 ec2_instance = ec2.Instance('ec2_instance',
                             ami=ami_id,  # Amazon Machine Image
-                            instance_type=webapp_instance_type,  # Default instance type
+                            instance_type=webapp.get("instance_type"),  # Default instance type
                             subnet_id=public_subnets[0],  # Subnet ID
                             key_name=key_name,  # SSH key name
                             vpc_security_group_ids=[app_security_group.id],  # Security Group
                             root_block_device=ec2.InstanceRootBlockDeviceArgs(
-                                volume_type=webapp_root_volume_type,  
-                                volume_size=webapp_root_volume_size,  
+                                volume_type=webapp.get("root_volume_type"),  
+                                volume_size=webapp.get("root_volume_size"),  
                                 delete_on_termination=True  # Terminate EBS volume on instance termination
                             ),
                             disable_api_termination=False,
                             tags= {
-                                "Name": webapp_instance_name
+                                "Name": webapp.get("name")
                             }
                             )
 
