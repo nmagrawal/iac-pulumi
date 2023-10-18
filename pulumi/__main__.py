@@ -175,9 +175,8 @@ ec2_instance = ec2.Instance('ec2_instance',
                             }
                             )
 
-# Export the name of the EC2 instance
-pulumi.export('ec2_instance_name', ec2_instance.id)
 # Export
+pulumi.export('ec2_instance_name', ec2_instance.id)
 pulumi.export("vpcId", vpc.id)
 pulumi.export("igId", ig.id)
 pulumi.export("publicRTId", public_rt.id)
