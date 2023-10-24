@@ -58,10 +58,12 @@ no_of_subnets = min(3, len(zones.names)) * 2
 
 subnet_cidrs = calculate_subnets(vpc_cidr, no_of_subnets)
 subnet_ids = []
+private_subnets = []
+public_subnets = []
 for i in range(no_of_subnets):
     # Determining subnet type
     subnet_type = "public" if i < no_of_subnets // 2 else "private"
-    
+
     # Create subnet
     subnet = aws.ec2.Subnet(f"{subnet_name}_{subnet_type}_{i}",
         vpc_id=vpc.id,
@@ -74,6 +76,8 @@ for i in range(no_of_subnets):
     subnet_ids.append((subnet.id, subnet_type))
 
 public_subnets = [subnet_id for subnet_id, subnet_type in subnet_ids if subnet_type == "public"]
+private_subnets = [subnet_id for subnet_id, subnet_type in subnet_ids if subnet_type == "private"]
+
 
 # Create public and private route tables
 public_rt = aws.ec2.RouteTable(f"{route_table_name}_public",
@@ -100,7 +104,7 @@ for i, (subnet_id, subnet_type) in enumerate(subnet_ids):
         route_table_id=rt_id,
         subnet_id=subnet_id)
 
-# Create a new security group
+# App Security Group
 app_security_group = ec2.SecurityGroup("appSecurityGroup",
     description="Security group for the application",
     vpc_id = vpc.id,
@@ -158,6 +162,61 @@ app_security_group = ec2.SecurityGroup("appSecurityGroup",
         ),
     ])
 
+rds_security_group = ec2.SecurityGroup("RDS Security Group",
+    description="Security group for the RDS instance",
+    vpc_id = vpc.id,
+    tags={
+        "Name": "RDS Security Group"
+    },
+    ingress=[
+        # SSH
+        ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=22,
+            to_port=22,
+            cidr_blocks=[
+                 ipv4_cidr_block
+            ],
+            ipv6_cidr_blocks=[
+                ipv6_cidr_block
+            ]
+        ),
+        ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=3306,
+            to_port=3306,
+            security_groups=[
+                app_security_group.id
+            ],
+        ),
+    ])
+
+rds_parameter_group = aws.rds.ParameterGroup("rds-parameter-group",
+    family="mariadb10.6",
+    description="Parameter group for the RDS instance",
+    )
+
+private_subnet_group = aws.rds.SubnetGroup("private_subnet_group",
+    subnet_ids=private_subnets,
+    tags={
+        "Name": "Private_Subnet_Group",
+    })
+
+rds_instance = aws.rds.Instance("csye6225",
+    allocated_storage=8,
+    db_name="csye6225",
+    engine="mariadb",
+    engine_version="10.6.15",
+    instance_class="db.t2.micro",
+    parameter_group_name=rds_parameter_group.name,
+    db_subnet_group_name=private_subnet_group.name,
+    vpc_security_group_ids=[rds_security_group.id],
+    max_allocated_storage=0,
+    publicly_accessible=False,
+    password="foobarbaz",
+    skip_final_snapshot=True,
+    username="foo")
+
 ec2_instance = ec2.Instance('ec2_instance',
                             ami=ami_id,  # Amazon Machine Image
                             instance_type=webapp.get("instance_type"),  # Default instance type
@@ -182,4 +241,8 @@ pulumi.export("igId", ig.id)
 pulumi.export("publicRTId", public_rt.id)
 pulumi.export("privateRTId", private_rt.id)
 pulumi.export("subnets", subnet_ids)
+pulumi.export("privateSubnetGroup", private_subnet_group.id)
 pulumi.export("appSecurityGroupId", app_security_group.id)
+pulumi.export("rdsSecurityGroup", rds_security_group.id)
+pulumi.export("rdsParameterGroup", rds_parameter_group.id)
+pulumi.export("rdsInstance", rds_instance.id)
