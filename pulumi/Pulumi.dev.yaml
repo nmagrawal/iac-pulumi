@@ -9,10 +9,19 @@ config:
   internet_gateway_name: iac-pulumi-dev-igw
   subnet_name: iac-pulumi-dev-subnet
   route_table_name: iac-pulumi-dev-rt
-  ami_id: ami-08ea29629e8d46669
+  ami_id: ami-0dadd88c0fbc9c774
   key_name: webappInstances
   webapp:
     name: webapp
     instance_type: t2.micro
     root_volume_size: 25
     root_volume_type: gp2
+  rds:
+    name: csye6225
+    engine: mariadb
+    engine_version: 10.6.15
+    instance_class: db.t2.micro
+    db_name: csye6225
+    username: csye6225master
+    password: csye6225password
+  properties_file: dev.properties

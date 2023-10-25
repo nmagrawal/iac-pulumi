@@ -4,6 +4,8 @@ import pulumi
 import pulumi_aws as aws
 import ipaddress
 from pulumi_aws import ec2
+import textwrap
+
 
 
 def calculate_subnets(vpc_cidr, num_subnets):
@@ -34,11 +36,14 @@ ipv6_cidr_block = config.require("ipv6_cidr_block")
 ami_id = config.require("ami_id")
 key_name = config.require("key_name")
 webapp = config.require_object("webapp")
+rds_config = config.require_object("rds")
+properties_file=config.require("properties_file")
 
 # Create VPC
 vpc = aws.ec2.Vpc(vpc_name,
     cidr_block=vpc_cidr,
     instance_tenancy="default",
+    enable_dns_hostnames=True,
     tags={
         "Name": vpc_name,
     })
@@ -160,7 +165,15 @@ app_security_group = ec2.SecurityGroup("appSecurityGroup",
                 ipv6_cidr_block
             ]
         ),
-    ])
+    ],
+    egress=[aws.ec2.SecurityGroupEgressArgs(
+        from_port=0,
+        to_port=0,
+        protocol="-1",
+        cidr_blocks=["0.0.0.0/0"],
+        ipv6_cidr_blocks=["::/0"],
+    )]
+    )
 
 rds_security_group = ec2.SecurityGroup("RDS Security Group",
     description="Security group for the RDS instance",
@@ -169,18 +182,6 @@ rds_security_group = ec2.SecurityGroup("RDS Security Group",
         "Name": "RDS Security Group"
     },
     ingress=[
-        # SSH
-        ec2.SecurityGroupIngressArgs(
-            protocol="tcp",
-            from_port=22,
-            to_port=22,
-            cidr_blocks=[
-                 ipv4_cidr_block
-            ],
-            ipv6_cidr_blocks=[
-                ipv6_cidr_block
-            ]
-        ),
         ec2.SecurityGroupIngressArgs(
             protocol="tcp",
             from_port=3306,
@@ -202,20 +203,41 @@ private_subnet_group = aws.rds.SubnetGroup("private_subnet_group",
         "Name": "Private_Subnet_Group",
     })
 
-rds_instance = aws.rds.Instance("csye6225",
+rds_instance = aws.rds.Instance(rds_config.get("name"),
     allocated_storage=8,
-    db_name="csye6225",
-    engine="mariadb",
-    engine_version="10.6.15",
-    instance_class="db.t2.micro",
+    db_name=rds_config.get("db_name"),
+    engine=rds_config.get("engine"),
+    engine_version=rds_config.get("engine_version"),
+    instance_class=rds_config.get("instance_class"),
     parameter_group_name=rds_parameter_group.name,
     db_subnet_group_name=private_subnet_group.name,
     vpc_security_group_ids=[rds_security_group.id],
     max_allocated_storage=0,
     publicly_accessible=False,
-    password="foobarbaz",
+    password=rds_config.get("password"),
     skip_final_snapshot=True,
-    username="foo")
+    username=rds_config.get("username"),
+    tags={
+        "Name": rds_config.get("name"),
+    },
+    )
+
+with open(properties_file, "r") as file:
+    base_properties = file.read()
+
+PROPERTIES_FILE='/tmp/application.properties'
+
+rds_instance_address = url = pulumi.Output.concat("jdbc:mariadb://", rds_instance.address, ":3306/", rds_config.get("db_name"))
+
+user_data = ["#!/bin/bash",
+             f"echo '{base_properties}' >> {PROPERTIES_FILE}",
+             f"echo 'spring.datasource.username={rds_config.get('username')}' >> {PROPERTIES_FILE}",
+             f"echo 'spring.datasource.password={rds_config.get('password')}' >> {PROPERTIES_FILE}",
+             f"echo 'application.config.users-csv-path=/opt/users.csv' >> {PROPERTIES_FILE}",
+             ]
+
+user_data = pulumi.Output.concat("\n".join(user_data),"\n", rds_instance_address.apply(lambda x: f"echo 'spring.datasource.url={x}' >> {PROPERTIES_FILE}"),"\n")
+user_data = pulumi.Output.concat(user_data, f"sudo mv {PROPERTIES_FILE} /opt/application.properties", "\n")
 
 ec2_instance = ec2.Instance('ec2_instance',
                             ami=ami_id,  # Amazon Machine Image
@@ -231,7 +253,8 @@ ec2_instance = ec2.Instance('ec2_instance',
                             disable_api_termination=False,
                             tags= {
                                 "Name": webapp.get("name")
-                            }
+                            },
+                            user_data=user_data
                             )
 
 # Export
