@@ -238,8 +238,8 @@ user_data = ["#!/bin/bash",
 
 user_data = pulumi.Output.concat("\n".join(user_data),"\n", rds_instance_address.apply(lambda x: f"echo 'spring.datasource.url={x}' >> {PROPERTIES_FILE}"),"\n")
 user_data = pulumi.Output.concat(user_data, f"sudo mv {PROPERTIES_FILE} /opt/csye6225/application.properties", "\n",
-                                 "sudo chown csye6225:csye6225 /opt/csye6225/", "\n",
-                                 "sudo chmod 740 /opt/csye6225/", "\n")
+                                 "sudo chown -R csye6225:csye6225 /opt/csye6225/", "\n",
+                                 "sudo chmod -R 740 /opt/csye6225/", "\n")
 
 ec2_instance = ec2.Instance('ec2_instance',
                             ami=ami_id,  # Amazon Machine Image
