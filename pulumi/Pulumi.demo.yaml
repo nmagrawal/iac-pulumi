@@ -16,3 +16,13 @@ config:
     instance_type: t2.micro
     root_volume_size: 25
     root_volume_type: gp2
+  rds:
+    allocated_storage: 20
+    name: csye6225
+    engine: mariadb
+    engine_version: 10.6.15
+    instance_class: db.t2.micro
+    db_name: csye6225
+    username: csye6225master
+    password: csye6225password
+  properties_file: dev.properties

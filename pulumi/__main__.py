@@ -204,7 +204,7 @@ private_subnet_group = aws.rds.SubnetGroup("private_subnet_group",
     })
 
 rds_instance = aws.rds.Instance(rds_config.get("name"),
-    allocated_storage=8,
+    allocated_storage=rds_config.get("allocated_storage"),
     db_name=rds_config.get("db_name"),
     engine=rds_config.get("engine"),
     engine_version=rds_config.get("engine_version"),
@@ -233,11 +233,13 @@ user_data = ["#!/bin/bash",
              f"echo '{base_properties}' >> {PROPERTIES_FILE}",
              f"echo 'spring.datasource.username={rds_config.get('username')}' >> {PROPERTIES_FILE}",
              f"echo 'spring.datasource.password={rds_config.get('password')}' >> {PROPERTIES_FILE}",
-             f"echo 'application.config.users-csv-path=/opt/users.csv' >> {PROPERTIES_FILE}",
+             f"echo 'application.config.users-csv-path=/opt/csye6225/users.csv' >> {PROPERTIES_FILE}",
              ]
 
 user_data = pulumi.Output.concat("\n".join(user_data),"\n", rds_instance_address.apply(lambda x: f"echo 'spring.datasource.url={x}' >> {PROPERTIES_FILE}"),"\n")
-user_data = pulumi.Output.concat(user_data, f"sudo mv {PROPERTIES_FILE} /opt/application.properties", "\n")
+user_data = pulumi.Output.concat(user_data, f"sudo mv {PROPERTIES_FILE} /opt/csye6225/application.properties", "\n",
+                                 "sudo chown csye6225:csye6225 /opt/csye6225/", "\n",
+                                 "sudo chmod 740 /opt/csye6225/", "\n")
 
 ec2_instance = ec2.Instance('ec2_instance',
                             ami=ami_id,  # Amazon Machine Image
