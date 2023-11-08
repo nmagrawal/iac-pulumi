@@ -9,13 +9,14 @@ config:
   internet_gateway_name: iac-pulumi-dev-igw
   subnet_name: iac-pulumi-dev-subnet
   route_table_name: iac-pulumi-dev-rt
-  ami_id: ami-031eabd92c34e38a9
+  ami_id: ami-0bb4d387a33d10bd1
   key_name: demoinstance
   webapp:
     name: webapp
     instance_type: t2.micro
     root_volume_size: 25
     root_volume_type: gp2
+    key_name: demoinstance
   rds:
     allocated_storage: 20
     name: csye6225
@@ -25,4 +26,7 @@ config:
     db_name: csye6225
     username: csye6225master
     password: csye6225password
+  route53:
+    hosted_zone_id: Z08765433RU31L2QUUPOE
+    domain_name: demo.makarandmadhavi.me
   properties_file: dev.properties

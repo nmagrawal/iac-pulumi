@@ -9,10 +9,10 @@ config:
   internet_gateway_name: iac-pulumi-dev-igw
   subnet_name: iac-pulumi-dev-subnet
   route_table_name: iac-pulumi-dev-rt
-  ami_id: ami-031eabd92c34e38a9
+  ami_id: ami-0e4852a8ec3dc06cb
   key_name: webappInstances
   webapp:
-    name: webapp
+    name: webapp1
     instance_type: t2.micro
     root_volume_size: 25
     root_volume_type: gp2
@@ -23,6 +23,12 @@ config:
     engine_version: 10.6.15
     instance_class: db.t2.micro
     db_name: csye6225
-    username: csye6225master
-    password: csye6225password
+  dbsecrets:
+    username:
+      secure: v1:k23xtToXHI9u2hzA:i9Nr6+Qt9itcg5hlGu3wFPkatxkc61O/
+    password:
+      secure: v1:H3B0voaZP5elV+LZ:dBjGqqqDJoC7oMgvlQQqW6fK4bdfCNqWlPw=
+  route53:
+    hosted_zone_id: Z08696738HJZO70RZB72
+    domain_name: dev.makarandmadhavi.me
   properties_file: dev.properties

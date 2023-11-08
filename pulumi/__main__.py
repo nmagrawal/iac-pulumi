@@ -5,6 +5,8 @@ import pulumi_aws as aws
 import ipaddress
 from pulumi_aws import ec2
 import textwrap
+from pulumi_aws import route53, Provider
+import json
 
 
 
@@ -20,10 +22,9 @@ def calculate_subnets(vpc_cidr, num_subnets):
     subnets = list(vpc_network.subnets(new_prefix=subnet_bits))
     
     return subnets
+
 # Load Pulumi config
 config = pulumi.Config()
-
-# Get region and CIDR block from config
 vpc_cidr = config.require("vpc_cidr")
 aws_config = pulumi.Config("aws")
 region = aws_config.get("region")
@@ -38,6 +39,8 @@ key_name = config.require("key_name")
 webapp = config.require_object("webapp")
 rds_config = config.require_object("rds")
 properties_file=config.require("properties_file")
+route53_config = config.require_object("route53")
+dbsecrets = config.require_secret_object("dbsecrets")
 
 # Create VPC
 vpc = aws.ec2.Vpc(vpc_name,
@@ -214,9 +217,9 @@ rds_instance = aws.rds.Instance(rds_config.get("name"),
     vpc_security_group_ids=[rds_security_group.id],
     max_allocated_storage=0,
     publicly_accessible=False,
-    password=rds_config.get("password"),
+    password=dbsecrets.apply(lambda x: x.get("password")),
     skip_final_snapshot=True,
-    username=rds_config.get("username"),
+    username=dbsecrets.apply(lambda x: x.get("username")),
     tags={
         "Name": rds_config.get("name"),
     },
@@ -229,17 +232,61 @@ PROPERTIES_FILE='/tmp/application.properties'
 
 rds_instance_address = url = pulumi.Output.concat("jdbc:mariadb://", rds_instance.address, ":3306/", rds_config.get("db_name"))
 
+username = dbsecrets.apply(lambda x: x.get("username"))
+password = dbsecrets.apply(lambda x: x.get("password"))
+
 user_data = ["#!/bin/bash",
              f"echo '{base_properties}' >> {PROPERTIES_FILE}",
-             f"echo 'spring.datasource.username={rds_config.get('username')}' >> {PROPERTIES_FILE}",
-             f"echo 'spring.datasource.password={rds_config.get('password')}' >> {PROPERTIES_FILE}",
+            #  f"echo 'spring.datasource.username={username}' >> {PROPERTIES_FILE}",
+            #  f"echo 'spring.datasource.password={password}' >> {PROPERTIES_FILE}",
              f"echo 'application.config.users-csv-path=/opt/csye6225/users.csv' >> {PROPERTIES_FILE}",
              ]
 
+
 user_data = pulumi.Output.concat("\n".join(user_data),"\n", rds_instance_address.apply(lambda x: f"echo 'spring.datasource.url={x}' >> {PROPERTIES_FILE}"),"\n")
+
+user_data = pulumi.Output.concat(user_data, "echo 'spring.datasource.username=", username, f"' >> {PROPERTIES_FILE}", "\n")
+user_data = pulumi.Output.concat(user_data, "echo 'spring.datasource.password=", password, f"' >> {PROPERTIES_FILE}", "\n")
+
 user_data = pulumi.Output.concat(user_data, f"sudo mv {PROPERTIES_FILE} /opt/csye6225/application.properties", "\n",
                                  "sudo chown -R csye6225:csye6225 /opt/csye6225/", "\n",
                                  "sudo chmod -R 740 /opt/csye6225/", "\n")
+
+cw_commands = [
+               "sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+    -a fetch-config \
+    -m ec2 \
+    -c file:/opt/cloudwatch-config.json \
+    -s",
+               "sudo systemctl restart amazon-cloudwatch-agent.service"
+]
+
+user_data = pulumi.Output.concat(user_data, "\n".join(cw_commands), "\n")
+
+cloud_watch_role = aws.iam.Role("CWAgentRole",
+    name="CWAgentRole",
+    description="Allows EC2 instances to call AWS services on your behalf.",
+    assume_role_policy=json.dumps({
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Action": "sts:AssumeRole",
+            "Effect": "Allow",
+            "Principal": {
+                "Service": "ec2.amazonaws.com",
+            },
+        }],
+    }),
+    tags={
+        "name": "CWAgentRole",
+    })
+
+policy_attachment = aws.iam.RolePolicyAttachment("cloudwatchRolePolicyAttachment",
+    role=cloud_watch_role.name,
+    policy_arn="arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy")
+
+instance_profile = aws.iam.InstanceProfile('myInstanceProfile',
+                                           role = cloud_watch_role.name
+                                           )
 
 ec2_instance = ec2.Instance('ec2_instance',
                             ami=ami_id,  # Amazon Machine Image
@@ -256,10 +303,20 @@ ec2_instance = ec2.Instance('ec2_instance',
                             tags= {
                                 "Name": webapp.get("name")
                             },
-                            user_data=user_data
+                            user_data=user_data,
+                            iam_instance_profile=instance_profile.name
                             )
 
-# Export
+ec2_ip = pulumi.Output.concat("", ec2_instance.public_ip)
+
+record = route53.Record(route53_config.get("domain_name"),
+    name=route53_config.get("domain_name"),
+    type="A", 
+    ttl="60", 
+    records=[ec2_ip], 
+    zone_id=route53_config.get("hosted_zone_id")) 
+
+#Export
 pulumi.export('ec2_instance_name', ec2_instance.id)
 pulumi.export("vpcId", vpc.id)
 pulumi.export("igId", ig.id)
