@@ -9,7 +9,7 @@ config:
   internet_gateway_name: iac-pulumi-dev-igw
   subnet_name: iac-pulumi-dev-subnet
   route_table_name: iac-pulumi-dev-rt
-  ami_id: ami-0e4852a8ec3dc06cb
+  ami_id: ami-0e7fae7856f9dda95
   key_name: webappInstances
   webapp:
     name: webapp1
