@@ -7,7 +7,7 @@ from pulumi_aws import ec2
 import textwrap
 from pulumi_aws import route53, Provider
 import json
-
+import base64
 
 
 def calculate_subnets(vpc_cidr, num_subnets):
@@ -112,26 +112,15 @@ for i, (subnet_id, subnet_type) in enumerate(subnet_ids):
         route_table_id=rt_id,
         subnet_id=subnet_id)
 
-# App Security Group
-app_security_group = ec2.SecurityGroup("appSecurityGroup",
-    description="Security group for the application",
+
+# LoadBalancer Security Group
+loadbalancer_security_group = ec2.SecurityGroup("loadbalancerSecurityGroup",
+    description="Security group for the Load Balancer",
     vpc_id = vpc.id,
     tags={
-        "Name": "application security group"
+        "Name": "loadbalancerSecurityGroup"
     },
     ingress=[
-        # SSH
-        ec2.SecurityGroupIngressArgs(
-            protocol="tcp",
-            from_port=22,
-            to_port=22,
-            cidr_blocks=[
-                 ipv4_cidr_block
-            ],
-            ipv6_cidr_blocks=[
-                ipv6_cidr_block
-            ]
-        ),
         # HTTP
         ec2.SecurityGroupIngressArgs(
             protocol="tcp",
@@ -155,17 +144,44 @@ app_security_group = ec2.SecurityGroup("appSecurityGroup",
             ipv6_cidr_blocks=[
                 ipv6_cidr_block
             ]
+        )
+    ],
+    egress=[aws.ec2.SecurityGroupEgressArgs(
+        from_port=0,
+        to_port=0,
+        protocol="-1",
+        cidr_blocks=["0.0.0.0/0"],
+        ipv6_cidr_blocks=["::/0"],
+    )]
+    )
+
+# App Security Group
+app_security_group = ec2.SecurityGroup("appSecurityGroup",
+    description="Security group for the application",
+    vpc_id = vpc.id,
+    tags={
+        "Name": "application security group"
+    },
+    ingress=[
+        # SSH
+        ec2.SecurityGroupIngressArgs(
+            protocol="tcp",
+            from_port=22,
+            to_port=22,
+            cidr_blocks=[
+                 ipv4_cidr_block
+            ],
+            ipv6_cidr_blocks=[
+                ipv6_cidr_block
+            ]
         ),
         # Application port
         ec2.SecurityGroupIngressArgs(
             protocol="tcp",
             from_port=8080,
             to_port=8080,
-            cidr_blocks=[
-                ipv4_cidr_block
-            ],
-            ipv6_cidr_blocks=[
-                ipv6_cidr_block
+            security_groups=[
+                loadbalancer_security_group.id
             ]
         ),
     ],
@@ -177,6 +193,7 @@ app_security_group = ec2.SecurityGroup("appSecurityGroup",
         ipv6_cidr_blocks=["::/0"],
     )]
     )
+
 
 rds_security_group = ec2.SecurityGroup("RDS Security Group",
     description="Security group for the RDS instance",
@@ -288,36 +305,185 @@ instance_profile = aws.iam.InstanceProfile('myInstanceProfile',
                                            role = cloud_watch_role.name
                                            )
 
-ec2_instance = ec2.Instance('ec2_instance',
-                            ami=ami_id,  # Amazon Machine Image
-                            instance_type=webapp.get("instance_type"),  # Default instance type
-                            subnet_id=public_subnets[0],  # Subnet ID
-                            key_name=key_name,  # SSH key name
-                            vpc_security_group_ids=[app_security_group.id],  # Security Group
-                            root_block_device=ec2.InstanceRootBlockDeviceArgs(
-                                volume_type=webapp.get("root_volume_type"),  
-                                volume_size=webapp.get("root_volume_size"),  
-                                delete_on_termination=True  # Terminate EBS volume on instance termination
-                            ),
-                            disable_api_termination=False,
-                            tags= {
-                                "Name": webapp.get("name")
-                            },
-                            user_data=user_data,
-                            iam_instance_profile=instance_profile.name
-                            )
+# ec2_instance = ec2.Instance('ec2_instance',
+#                             ami=ami_id,  
+#                             instance_type=webapp.get("instance_type"),  
+#                             subnet_id=public_subnets[0],  
+#                             key_name=key_name,  
+#                             vpc_security_group_ids=[app_security_group.id],  
+#                             root_block_device=ec2.InstanceRootBlockDeviceArgs(
+#                                 volume_type=webapp.get("root_volume_type"),  
+#                                 volume_size=webapp.get("root_volume_size"),  
+#                                 delete_on_termination=True  
+#                             ),
+#                             disable_api_termination=False,
+#                             tags= {
+#                                 "Name": webapp.get("name")
+#                             },
+#                             user_data=user_data,
+#                             iam_instance_profile=instance_profile.name
+#                             )
 
-ec2_ip = pulumi.Output.concat("", ec2_instance.public_ip)
+user_data = user_data.apply(lambda x: base64.b64encode(x.encode("ascii")).decode("ascii"))
 
+# Create a launch template
+launch_template = aws.ec2.LaunchTemplate("webapp_launch_template",
+    image_id=ami_id,  # Amazon Machine Image ID
+    instance_type=webapp.get("instance_type"), 
+    network_interfaces=[aws.ec2.LaunchTemplateNetworkInterfaceArgs(
+        associate_public_ip_address="true",
+        subnet_id=public_subnets[0],
+        security_groups=[app_security_group.id]
+    )], 
+    key_name=key_name,  # SSH key name
+    block_device_mappings=[{  # Array of mappings
+        "device_name": "/dev/xvda",  # Device name
+        "ebs": {
+            "volume_size": webapp.get("root_volume_size"),   # Volume Size
+            "volume_type": webapp.get("root_volume_type"),  # Volume Type
+            "delete_on_termination": True  # Terminate EBS volume on instance termination
+        },
+    }],
+    disable_api_termination=False,  # Instance can be terminated using the Amazon EC2 console, CLI, and API
+    tags= { 
+        "Name": webapp.get("name"),
+    },
+    user_data=user_data,
+    iam_instance_profile={
+        "name": instance_profile.name,
+    },
+    tag_specifications = [ec2.LaunchTemplateTagSpecificationArgs(
+        resource_type="instance",
+        tags={
+            "Name":webapp.get("name")
+        }
+    )]
+)
+
+# # Application Loadbalancer
+app_load_balancer = aws.lb.LoadBalancer("AppLoadBalancer",
+    internal=False,
+    load_balancer_type="application",
+    security_groups=[loadbalancer_security_group.id],
+    subnets=public_subnets,
+    enable_deletion_protection=False,
+    tags={
+        "Environment": "development",
+    })
+
+# # Target Group
+target_group = aws.lb.TargetGroup("AppTargetGroup",
+    target_type="instance",
+    port=8080,
+    protocol="HTTP",
+    slow_start=30,
+    vpc_id=vpc.id,
+    health_check= aws.lb.TargetGroupHealthCheckArgs(
+        port="8080",
+        protocol="HTTP",
+        matcher="200",
+        path="/healthz",
+        interval=10,
+        healthy_threshold=2,
+    ),
+    ) 
+
+pulumi.export("target_group_arn", target_group.arn)
+
+# # Listner
+listener = aws.lb.Listener('app-listener',
+    load_balancer_arn=app_load_balancer.arn,
+    port=80,
+    default_actions=[
+        aws.lb.ListenerDefaultActionArgs(
+            type='forward',
+            target_group_arn=target_group.arn,
+        ),
+    ],
+)
+
+pulumi.export("listener_arn", listener.arn)
+
+# # AutoScalling Group
+autoscalling_group = aws.autoscaling.Group("AppAutoScalingGroup",
+    desired_capacity=1,
+    max_size=3,
+    min_size=1,
+    health_check_grace_period=300,
+    health_check_type="ELB",
+    target_group_arns=[target_group.arn],
+    launch_template=aws.autoscaling.GroupLaunchTemplateArgs(
+        id=launch_template.id,
+        version="$Latest",
+    ))
+
+# Scale up policy
+scale_up = aws.autoscaling.Policy("scale_up",
+    adjustment_type="ChangeInCapacity",
+    autoscaling_group_name=autoscalling_group.name,
+    enabled=True,
+    policy_type="SimpleScaling",
+    scaling_adjustment=1,
+    metric_aggregation_type="Average",
+)
+pulumi.export("scale_up_policy_arn", scale_up.arn)
+
+# Scale up policy
+scale_down = aws.autoscaling.Policy("scale_down",
+    adjustment_type="ChangeInCapacity",
+    autoscaling_group_name=autoscalling_group.name,
+    enabled=True,
+    policy_type="SimpleScaling",
+    scaling_adjustment=-1,
+    metric_aggregation_type="Average",
+)
+pulumi.export("scale_up_policy_arn", scale_up.arn)
+
+# Create CloudWatch Metric Alarm resource that triggers the Scale Up Policy
+cpu_utilization_high_alarm = aws.cloudwatch.MetricAlarm("cpuUtilizationHigh",
+    comparison_operator="GreaterThanOrEqualToThreshold",
+    evaluation_periods="1",
+    metric_name="CPUUtilization",
+    namespace="AWS/EC2",
+    period="60",
+    statistic="Average",
+    threshold="5",
+    alarm_actions=[scale_up.arn],
+    dimensions={
+        "AutoScalingGroupName": autoscalling_group.name,
+    },
+)
+
+# Create CloudWatch Metric Alarm resource that triggers the Scale Down Policy
+cpu_utilization_high_alarm = aws.cloudwatch.MetricAlarm("cpuUtilizationLow",
+    comparison_operator="LessThanOrEqualToThreshold",
+    evaluation_periods="1",
+    metric_name="CPUUtilization",
+    namespace="AWS/EC2",
+    period="60",
+    statistic="Average",
+    threshold="3",
+    alarm_actions=[scale_down.arn],
+    dimensions={
+        "AutoScalingGroupName": autoscalling_group.name,
+    },
+)
+
+# DNS Alias
 record = route53.Record(route53_config.get("domain_name"),
     name=route53_config.get("domain_name"),
     type="A", 
-    ttl="60", 
-    records=[ec2_ip], 
+    aliases=[route53.RecordAliasArgs(
+        name=app_load_balancer.dns_name,
+        zone_id=app_load_balancer.zone_id,
+        evaluate_target_health=True
+    )], 
     zone_id=route53_config.get("hosted_zone_id")) 
 
+# # ec2_ip = pulumi.Output.concat("", ec2_instance.public_ip)
+
 #Export
-pulumi.export('ec2_instance_name', ec2_instance.id)
+# pulumi.export('ec2_instance_name', ec2_instance.id)
 pulumi.export("vpcId", vpc.id)
 pulumi.export("igId", ig.id)
 pulumi.export("publicRTId", public_rt.id)
