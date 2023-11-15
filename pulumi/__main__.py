@@ -41,6 +41,9 @@ rds_config = config.require_object("rds")
 properties_file=config.require("properties_file")
 route53_config = config.require_object("route53")
 dbsecrets = config.require_secret_object("dbsecrets")
+autoscale_config = config.require_object("autoscalling")
+launch_template_name = config.require("launch_template_name")
+environment = config.require("environment")
 
 # Create VPC
 vpc = aws.ec2.Vpc(vpc_name,
@@ -327,7 +330,8 @@ instance_profile = aws.iam.InstanceProfile('myInstanceProfile',
 user_data = user_data.apply(lambda x: base64.b64encode(x.encode("ascii")).decode("ascii"))
 
 # Create a launch template
-launch_template = aws.ec2.LaunchTemplate("webapp_launch_template",
+launch_template = aws.ec2.LaunchTemplate(resource_name=launch_template_name,
+    name=launch_template_name,
     image_id=ami_id,  # Amazon Machine Image ID
     instance_type=webapp.get("instance_type"), 
     network_interfaces=[aws.ec2.LaunchTemplateNetworkInterfaceArgs(
@@ -368,22 +372,23 @@ app_load_balancer = aws.lb.LoadBalancer("AppLoadBalancer",
     subnets=public_subnets,
     enable_deletion_protection=False,
     tags={
-        "Environment": "development",
+        "Name": "AppLoadBalancer",
+        "Environment": environment,
     })
 
 # # Target Group
 target_group = aws.lb.TargetGroup("AppTargetGroup",
     target_type="instance",
-    port=8080,
-    protocol="HTTP",
+    port=autoscale_config["target_group"]["port"],
+    protocol=autoscale_config["target_group"]["protocol"],
     slow_start=30,
     vpc_id=vpc.id,
     health_check= aws.lb.TargetGroupHealthCheckArgs(
-        port="8080",
+        port=autoscale_config["target_group"]["port"],
         protocol="HTTP",
-        matcher="200",
-        path="/healthz",
-        interval=10,
+        matcher=autoscale_config["target_group"]["healthy_status_code"],
+        path=autoscale_config["target_group"]["health_check_path"],
+        interval=autoscale_config["target_group"]["health_check_interval_seconds"],
         healthy_threshold=2,
     ),
     ) 
@@ -393,7 +398,7 @@ pulumi.export("target_group_arn", target_group.arn)
 # # Listner
 listener = aws.lb.Listener('app-listener',
     load_balancer_arn=app_load_balancer.arn,
-    port=80,
+    port=autoscale_config["listner"]["port"],
     default_actions=[
         aws.lb.ListenerDefaultActionArgs(
             type='forward',
@@ -407,15 +412,34 @@ pulumi.export("listener_arn", listener.arn)
 # # AutoScalling Group
 autoscalling_group = aws.autoscaling.Group("AppAutoScalingGroup",
     desired_capacity=1,
-    max_size=3,
-    min_size=1,
-    health_check_grace_period=300,
+    default_cooldown=autoscale_config.get("default_cooldown"),
+    max_size=autoscale_config.get("max_size"),
+    min_size=autoscale_config.get("min_size"),
+    health_check_grace_period=autoscale_config.get("health_check_grace_period"),
     health_check_type="ELB",
     target_group_arns=[target_group.arn],
     launch_template=aws.autoscaling.GroupLaunchTemplateArgs(
         id=launch_template.id,
         version="$Latest",
     ))
+
+name_tag = aws.autoscaling.Tag(resource_name="Name_tag",
+    autoscaling_group_name=autoscalling_group.name,
+    tag=aws.autoscaling.TagTagArgs(
+        key="Name",
+        value=webapp.get("name"),
+        propagate_at_launch=True,
+        )
+    )
+
+environment_tag = aws.autoscaling.Tag(resource_name="Environment_tag",
+    autoscaling_group_name=autoscalling_group.name,
+    tag=aws.autoscaling.TagTagArgs(
+        key="Environment",
+        value=environment,
+        propagate_at_launch=True,
+        )
+    )
 
 # Scale up policy
 scale_up = aws.autoscaling.Policy("scale_up",
@@ -428,7 +452,7 @@ scale_up = aws.autoscaling.Policy("scale_up",
 )
 pulumi.export("scale_up_policy_arn", scale_up.arn)
 
-# Scale up policy
+# Scale Down policy
 scale_down = aws.autoscaling.Policy("scale_down",
     adjustment_type="ChangeInCapacity",
     autoscaling_group_name=autoscalling_group.name,
@@ -439,30 +463,30 @@ scale_down = aws.autoscaling.Policy("scale_down",
 )
 pulumi.export("scale_up_policy_arn", scale_up.arn)
 
-# Create CloudWatch Metric Alarm resource that triggers the Scale Up Policy
+# CloudWatch Metric Alarm resource that triggers the Scale Up Policy
 cpu_utilization_high_alarm = aws.cloudwatch.MetricAlarm("cpuUtilizationHigh",
     comparison_operator="GreaterThanOrEqualToThreshold",
-    evaluation_periods="1",
-    metric_name="CPUUtilization",
+    evaluation_periods=autoscale_config.get("evaluation_periods"),
+    metric_name=autoscale_config.get("metric_type"),
     namespace="AWS/EC2",
-    period="60",
+    period=autoscale_config.get("period"),
     statistic="Average",
-    threshold="5",
+    threshold=autoscale_config.get("scale_up_threshold"),
     alarm_actions=[scale_up.arn],
     dimensions={
         "AutoScalingGroupName": autoscalling_group.name,
     },
 )
 
-# Create CloudWatch Metric Alarm resource that triggers the Scale Down Policy
+# CloudWatch Metric Alarm resource that triggers the Scale Down Policy
 cpu_utilization_high_alarm = aws.cloudwatch.MetricAlarm("cpuUtilizationLow",
     comparison_operator="LessThanOrEqualToThreshold",
-    evaluation_periods="1",
-    metric_name="CPUUtilization",
+    evaluation_periods=autoscale_config.get("evaluation_periods"),
+    metric_name=autoscale_config.get("metric_type"),
     namespace="AWS/EC2",
-    period="60",
+    period=autoscale_config.get("period"),
     statistic="Average",
-    threshold="3",
+    threshold=autoscale_config.get("scale_down_threshold"),
     alarm_actions=[scale_down.arn],
     dimensions={
         "AutoScalingGroupName": autoscalling_group.name,
