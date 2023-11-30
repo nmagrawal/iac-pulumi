@@ -2,53 +2,64 @@ encryptionsalt: v1:HMdW2wYhr94=:v1:WITX3og2SGhau+lg:z+wSTgHi+HIsenbuERNHR8Unp3ie
 config:
   aws:profile: demo
   aws:region: us-east-1
-  environment: demo
-  vpc_cidr: 10.0.0.0/16
-  ipv4_cidr_block: 0.0.0.0/0
-  ipv6_cidr_block: ::/0
-  vpc_name: iac-pulumi-dev
-  internet_gateway_name: iac-pulumi-demo-igw
-  subnet_name: iac-pulumi-demo-subnet
-  route_table_name: iac-pulumi-demo-rt
-  ami_id: ami-0e7fae7856f9dda95
-  key_name: demoinstance
-  properties_file: dev.properties
-  webapp:
-    name: webapp
-    instance_type: t2.micro
-    root_volume_size: 25
-    root_volume_type: gp2
-  rds:
+  gcp:project: inner-encoder-406422
+  iac-pulumi:ami_id: ami-0ebd17190bf90c22e
+  iac-pulumi:autoscalling:
+    default_cooldown: 60
+    evaluation_periods: 1
+    health_check_grace_period: 300
+    listner:
+      port: 80
+    max_size: 3
+    metric_type: CPUUtilization
+    min_size: 1
+    period: 120
+    scale_down_cooldown: 120
+    scale_down_threshold: 10
+    scale_up_cooldown: 120
+    scale_up_threshold: 20
+    target_group:
+      health_check_interval_seconds: 30
+      health_check_path: /healthz
+      healthy_status_code: 200
+      port: 8080
+      protocol: HTTP
+  iac-pulumi:dbsecrets:
+    password:
+      secure: v1:/u+YHGKQKe+s8O3a:Dn+yo+cvVXkmsvPXefKr+5bKzymnsWZS6I8U
+    username:
+      secure: v1:zz+uAPMcB7UNgvqG:yaZuEyoq2ds76j8IOLXTetjVpr7jC5J4
+  iac-pulumi:environment: demo
+  iac-pulumi:internet_gateway_name: iac-pulumi-demo-igw
+  iac-pulumi:ipv4_cidr_block: 0.0.0.0/0
+  iac-pulumi:ipv6_cidr_block: ::/0
+  iac-pulumi:key_name: demoinstance
+  iac-pulumi:launch_template_name: csye6225_asgtp
+  iac-pulumi:properties_file: dev.properties
+  iac-pulumi:rds:
     allocated_storage: 20
-    name: csye6225
+    db_name: csye6225
     engine: mariadb
     engine_version: 10.6.15
     instance_class: db.t2.micro
-    db_name: csye6225
-  dbsecrets:
-    username:
-      secure: v1:zz+uAPMcB7UNgvqG:yaZuEyoq2ds76j8IOLXTetjVpr7jC5J4
-    password:
-      secure: v1:/u+YHGKQKe+s8O3a:Dn+yo+cvVXkmsvPXefKr+5bKzymnsWZS6I8U
-  route53:
-    hosted_zone_id: Z08765433RU31L2QUUPOE
+    name: csye6225
+  iac-pulumi:route_table_name: iac-pulumi-demo-rt
+  iac-pulumi:route53:
     domain_name: demo.makarandmadhavi.me
-  launch_template_name: csye6225_asg
-  autoscalling:
-    default_cooldown: 60
-    min_size: 1
-    max_size: 3
-    metric_type: CPUUtilization
-    scale_up_threshold: 5
-    scale_down_threshold: 3
-    period: 60
-    evaluation_periods: 1
-    health_check_grace_period: 300
-    target_group:
-      port: 8080
-      protocol: HTTP
-      health_check_path: /healthz
-      health_check_interval_seconds: 30
-      healthy_status_code: 200
-    listner:
-      port: 80 
+    hosted_zone_id: Z08765433RU31L2QUUPOE
+  iac-pulumi:subnet_name: iac-pulumi-demo-subnet
+  iac-pulumi:vpc_cidr: 10.0.0.0/16
+  iac-pulumi:vpc_name: iac-pulumi-dev
+  iac-pulumi:webapp:
+    instance_type: t2.micro
+    name: webapp1
+    root_volume_size: 25
+    root_volume_type: gp2
+  iac-pulumi:cloud_storage:
+    bucket_name: makjets_demo
+  iac-pulumi:sender_email: makarand@demo.makarandmadhavi.me
+  iac-pulumi:dynamo_db:
+    table_name: email_tracker
+    read_capacity: 10
+    write_capacity: 10
+  iac-pulumi:lambda_repo_path: ../../serverless

@@ -1,7 +1,9 @@
 """An AWS Python Pulumi program"""
 
+from os import name
 import pulumi
 import pulumi_aws as aws
+import pulumi_gcp as gcp
 import ipaddress
 from pulumi_aws import ec2
 import textwrap
@@ -27,6 +29,7 @@ def calculate_subnets(vpc_cidr, num_subnets):
 config = pulumi.Config()
 vpc_cidr = config.require("vpc_cidr")
 aws_config = pulumi.Config("aws")
+gcp_config = pulumi.Config("gcp")
 region = aws_config.get("region")
 vpc_name = config.require("vpc_name")
 internet_gateway_name = config.require("internet_gateway_name")
@@ -44,6 +47,10 @@ dbsecrets = config.require_secret_object("dbsecrets")
 autoscale_config = config.require_object("autoscalling")
 launch_template_name = config.require("launch_template_name")
 environment = config.require("environment")
+cloud_storage_config = config.require_object("cloud_storage")
+sender_email = config.require("sender_email")
+dynamo_db_config = config.require_object("dynamo_db")
+lambda_repo_path = config.require("lambda_repo_path")
 
 # Create VPC
 vpc = aws.ec2.Vpc(vpc_name,
@@ -245,6 +252,253 @@ rds_instance = aws.rds.Instance(rds_config.get("name"),
     },
     )
 
+# GCP
+
+# Create a Google Cloud storage bucket
+bucket = gcp.storage.Bucket(cloud_storage_config.get("bucket_name"),
+    name=cloud_storage_config.get("bucket_name"),
+    location='US-EAST1',
+    public_access_prevention="enforced",
+    uniform_bucket_level_access=False,
+    storage_class='STANDARD',
+    force_destroy=True,
+)
+
+# Create a GCP service account 
+account = gcp.serviceaccount.Account('lambda-service-account',
+    account_id='lambda-service-account',
+    display_name='lambda-service-account',
+    project=gcp_config.get("project")
+)
+
+# Create a GCP service account key
+service_account_key = gcp.serviceaccount.Key('lambda-service-account-key',
+    service_account_id=account.name)
+
+# Grant the service account access to the bucket
+bucket_access = gcp.storage.BucketAccessControl('bucket-access',
+    bucket=bucket.name,
+    role='WRITER',
+    entity=account.email.apply(lambda id: f'user-{id}')
+)
+
+# Export the name of the bucket
+pulumi.export('bucketName', bucket.name)
+# Export the Email of the service account
+pulumi.export('serviceAccountEmail', account.email)
+
+# Export the bucket's selfLink
+pulumi.export('bucketSelfLink', bucket.url)
+
+# for Lamda Function
+
+# specify the policy
+policy={
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:PutMetricFilter",
+                "logs:PutRetentionPolicy"
+            ],
+            "Resource": [
+                "*"
+            ]
+        }
+    ]
+}
+
+# create role and attach the policy for success feedback
+sns_success_feedback_role = aws.iam.Role("SNSSuccessFeedback",
+    name="SNSSuccessFeedback",
+    assume_role_policy=pulumi.Output.secret("""{
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Action": "sts:AssumeRole",
+                "Principal": {
+                    "Service": "sns.amazonaws.com"
+                },
+                "Effect": "Allow"
+            }
+        ]
+    }""")
+)
+
+success_feedback_role_policy = aws.iam.RolePolicy("snsSuccessFeedbackRolePolicy",
+    role=sns_success_feedback_role.id,
+    policy=pulumi.Output.secret(policy)
+)
+
+# create role and attach the policy for failure feedback
+sns_failure_feedback_role = aws.iam.Role("SNSFailureFeedback",
+    name="SNSFailureFeedback",
+    assume_role_policy=pulumi.Output.secret("""{
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Action": "sts:AssumeRole",
+                "Principal": {
+                    "Service": "sns.amazonaws.com"
+                },
+                "Effect": "Allow"
+            }
+        ]
+    }""")
+)
+
+failure_feedback_role_policy = aws.iam.RolePolicy("snsFailureFeedbackRolePolicy",
+    role=sns_failure_feedback_role.id,
+    policy=pulumi.Output.secret(policy)
+)
+
+# Export role ARNs
+pulumi.export("sns_success_feedback_role_arn", sns_success_feedback_role.arn)
+pulumi.export("sns_failure_feedback_role_arn", sns_failure_feedback_role.arn)
+
+# Create an SNS Topic
+sns_topic = aws.sns.Topic('submissions',
+                          name='submissions',
+                          lambda_success_feedback_role_arn=sns_success_feedback_role.arn,
+                          lambda_failure_feedback_role_arn=sns_failure_feedback_role.arn,
+                          lambda_success_feedback_sample_rate=100,
+                          tags={
+                              "Name": "submissions"
+                          }
+                          )
+
+# Export the ARN of the SNS Topic
+pulumi.export('sns_topic_arn', sns_topic.arn)
+
+# Create IAM role for the Lambda function
+lambda_role = aws.iam.Role('lambdaRole',
+    name='lambdaRole',
+    assume_role_policy="""{
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Action": "sts:AssumeRole",
+          "Principal": {
+            "Service": "lambda.amazonaws.com"
+          },
+          "Effect": "Allow"
+        }
+      ]
+    }""")
+
+# Attach the policy to the role
+attach_policy = aws.iam.RolePolicyAttachment('attach_policy',
+    policy_arn='arn:aws:iam::aws:policy/service-role/AWSLambdaDynamoDBExecutionRole',  # AWS managed policy
+    role=lambda_role.name
+)
+
+attach_policy2 = aws.iam.RolePolicyAttachment('attach_policy2',
+    policy_arn='arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess',  # AWS managed policy
+    role=lambda_role.name
+)
+
+# Define the policy to grant the necessary SES permissions
+email_policy = {
+    "Version": "2012-10-17",
+    "Statement": [{
+        "Effect": "Allow",
+        "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+        "Resource": "*"
+    }]
+}
+
+# Attach the policy to the IAM Role
+iam_role_policy_email = aws.iam.RolePolicy("email_policy",
+    role=lambda_role.name,
+    policy=email_policy,
+)
+
+# Dynamodb
+
+dynamo_db = aws.dynamodb.Table(dynamo_db_config.get("table_name"),
+    name=dynamo_db_config.get("table_name"),
+    attributes=[
+        aws.dynamodb.TableAttributeArgs(
+            name="Id",
+            type="S",
+        ),
+        aws.dynamodb.TableAttributeArgs(
+            name="recipient",
+            type="S",
+        )
+    ],
+    global_secondary_indexes=[aws.dynamodb.TableGlobalSecondaryIndexArgs(
+        hash_key="recipient",
+        name="recipientIndex",
+        non_key_attributes=["details","status"],
+        projection_type="INCLUDE",
+        read_capacity=dynamo_db_config.get("read_capacity"),
+        write_capacity=dynamo_db_config.get("write_capacity"),
+    )],
+    hash_key="Id",
+    read_capacity=20,
+    write_capacity=20
+)
+
+import shutil
+
+source_path =  lambda_repo_path + '/main.py'
+destination_path = lambda_repo_path +'/package/main.py'
+
+shutil.copy(source_path, destination_path)
+
+def wrap_archive(private_key):
+    decoded_content = base64.b64decode(private_key).decode('utf-8')
+    lambda_code = pulumi.AssetArchive({
+    '.': pulumi.FileArchive(lambda_repo_path + '/package'),
+    'key.json': pulumi.StringAsset(decoded_content),
+    })
+    return lambda_code
+
+
+# Archive the serverless directory
+lambda_code = service_account_key.private_key.apply(wrap_archive)
+
+pulumi.export('serviceAccountKeyJson', service_account_key.private_key)
+
+# Create a Lambda function, using code from the `../serverless` directory (relative to Pulumi program)
+lambda_function = aws.lambda_.Function('process_submissions',
+    name='process_submissions',
+    code=lambda_code,
+    handler='main.lambda_handler',  # assuming python code has `def lambda_handler(event, context):`
+    role=lambda_role.arn,
+    runtime='python3.11',
+    timeout=300,
+    environment=aws.lambda_.FunctionEnvironmentArgs(
+        variables={
+            "GOOGLE_APPLICATION_CREDENTIALS": "key.json",
+            "SENDER_EMAIL": sender_email,
+            "TABLE_NAME": dynamo_db_config.get("table_name"),
+        }
+    )
+)
+
+# Create a subscription for the SNS topic that triggers the Lambda function
+sns_topic_subscription = aws.sns.TopicSubscription("lambda_topic_subscription",
+    protocol="lambda",
+    endpoint=lambda_function.arn,  # Trigger the Lambda function on message published
+    topic=sns_topic.arn
+)
+
+# Grant permissions for the SNS topic to trigger the Lambda function
+permission = aws.lambda_.Permission('permission',
+    action='lambda:InvokeFunction',
+    function=lambda_function.name,
+    principal='sns.amazonaws.com',
+    source_arn=sns_topic.arn
+)
+
+
+
 with open(properties_file, "r") as file:
     base_properties = file.read()
 
@@ -267,7 +521,9 @@ user_data = pulumi.Output.concat("\n".join(user_data),"\n", rds_instance_address
 
 user_data = pulumi.Output.concat(user_data, "echo 'spring.datasource.username=", username, f"' >> {PROPERTIES_FILE}", "\n")
 user_data = pulumi.Output.concat(user_data, "echo 'spring.datasource.password=", password, f"' >> {PROPERTIES_FILE}", "\n")
-
+user_data = pulumi.Output.concat(user_data, "echo 'aws.region=", region, f"' >> {PROPERTIES_FILE}", "\n")
+user_data = pulumi.Output.concat(user_data, "echo 'aws.sns.topicArn=", sns_topic.arn, f"' >> {PROPERTIES_FILE}", "\n")
+user_data = pulumi.Output.concat(user_data, "echo 'aws.profile=demo' >> ", PROPERTIES_FILE, "\n")
 user_data = pulumi.Output.concat(user_data, f"sudo mv {PROPERTIES_FILE} /opt/csye6225/application.properties", "\n",
                                  "sudo chown -R csye6225:csye6225 /opt/csye6225/", "\n",
                                  "sudo chmod -R 740 /opt/csye6225/", "\n")
@@ -303,6 +559,10 @@ cloud_watch_role = aws.iam.Role("CWAgentRole",
 policy_attachment = aws.iam.RolePolicyAttachment("cloudwatchRolePolicyAttachment",
     role=cloud_watch_role.name,
     policy_arn="arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy")
+
+SNS_policy_attachment = aws.iam.RolePolicyAttachment("snsPolicyAttachment",
+    role=cloud_watch_role.name,
+    policy_arn="arn:aws:iam::aws:policy/AmazonSNSFullAccess")
 
 instance_profile = aws.iam.InstanceProfile('myInstanceProfile',
                                            role = cloud_watch_role.name
@@ -449,6 +709,7 @@ scale_up = aws.autoscaling.Policy("scale_up",
     policy_type="SimpleScaling",
     scaling_adjustment=1,
     metric_aggregation_type="Average",
+    cooldown=autoscale_config.get("scale_up_cooldown"),
 )
 pulumi.export("scale_up_policy_arn", scale_up.arn)
 
@@ -460,6 +721,7 @@ scale_down = aws.autoscaling.Policy("scale_down",
     policy_type="SimpleScaling",
     scaling_adjustment=-1,
     metric_aggregation_type="Average",
+    cooldown=autoscale_config.get("scale_down_cooldown"),
 )
 pulumi.export("scale_up_policy_arn", scale_up.arn)
 
@@ -503,8 +765,6 @@ record = route53.Record(route53_config.get("domain_name"),
         evaluate_target_health=True
     )], 
     zone_id=route53_config.get("hosted_zone_id")) 
-
-# # ec2_ip = pulumi.Output.concat("", ec2_instance.public_ip)
 
 #Export
 # pulumi.export('ec2_instance_name', ec2_instance.id)
