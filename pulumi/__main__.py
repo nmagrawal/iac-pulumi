@@ -131,18 +131,18 @@ loadbalancer_security_group = ec2.SecurityGroup("loadbalancerSecurityGroup",
         "Name": "loadbalancerSecurityGroup"
     },
     ingress=[
-        # HTTP
-        ec2.SecurityGroupIngressArgs(
-            protocol="tcp",
-            from_port=80,
-            to_port=80,
-            cidr_blocks=[
-                ipv4_cidr_block
-            ],
-            ipv6_cidr_blocks=[
-                ipv6_cidr_block
-            ]
-        ),
+        # # HTTP
+        # ec2.SecurityGroupIngressArgs(
+        #     protocol="tcp",
+        #     from_port=80,
+        #     to_port=80,
+        #     cidr_blocks=[
+        #         ipv4_cidr_block
+        #     ],
+        #     ipv6_cidr_blocks=[
+        #         ipv6_cidr_block
+        #     ]
+        # ),
         # HTTPS
         ec2.SecurityGroupIngressArgs(
             protocol="tcp",
@@ -659,6 +659,8 @@ pulumi.export("target_group_arn", target_group.arn)
 listener = aws.lb.Listener('app-listener',
     load_balancer_arn=app_load_balancer.arn,
     port=autoscale_config["listner"]["port"],
+    protocol=autoscale_config["listner"]["protocol"],
+    certificate_arn=autoscale_config["listner"]["certificate_arn"],
     default_actions=[
         aws.lb.ListenerDefaultActionArgs(
             type='forward',
@@ -671,6 +673,7 @@ pulumi.export("listener_arn", listener.arn)
 
 # # AutoScalling Group
 autoscalling_group = aws.autoscaling.Group("AppAutoScalingGroup",
+    name=autoscale_config.get("name"),
     desired_capacity=1,
     default_cooldown=autoscale_config.get("default_cooldown"),
     max_size=autoscale_config.get("max_size"),

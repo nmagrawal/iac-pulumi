@@ -3,13 +3,17 @@ config:
   aws:profile: demo
   aws:region: us-east-1
   gcp:project: inner-encoder-406422
-  iac-pulumi:ami_id: ami-0ebd17190bf90c22e
+  iac-pulumi:ami_id: ami-0fa9e2ba25423de5a
   iac-pulumi:autoscalling:
+    name: AppAutoScalingGroup
     default_cooldown: 60
     evaluation_periods: 1
     health_check_grace_period: 300
     listner:
-      port: 80
+      port: 443
+      protocol: HTTPS
+      ssl_policy: HTTPS
+      certificate_arn: arn:aws:acm:us-east-1:868203542116:certificate/f2a84b1b-1347-400e-9d78-399d50b757c3
     max_size: 3
     metric_type: CPUUtilization
     min_size: 1
@@ -57,7 +61,7 @@ config:
     root_volume_type: gp2
   iac-pulumi:cloud_storage:
     bucket_name: makjets_demo
-  iac-pulumi:sender_email: makarand@demo.makarandmadhavi.me
+  iac-pulumi:sender_email: noreply@mail.makarandmadhavi.me
   iac-pulumi:dynamo_db:
     table_name: email_tracker
     read_capacity: 10
