@@ -32,6 +32,17 @@ Follow these steps to deploy Plumi on AWS:
 
 ## Configuration
 aws and other config settings can be changed from pulumi.dev.yaml file
+
+## SSL Certificate
+
+To import SSL certificate in aws certificate manager use the following command 
+
+```bash
+aws acm import-certificate --profile <aws profile> \
+  --certificate fileb://<certificate file> \
+  --private-key fileb://<private key file>
+```
+
 ## Maintenance and Customization
 
 For ongoing maintenance and customization of your Plumi AWS deployment, please refer to the [Plumi documentation](https://plumi.readthedocs.io/en/latest/).
