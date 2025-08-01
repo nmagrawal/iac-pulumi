@@ -1,6 +1,7 @@
 # iac-pulumi
 
-This README provides instructions on how to run this [Plumi](https://plumi.org/) project sharing platform on Amazon Web Services (AWS). 
+This README provides instructions on how to run this [Plumi](https://plumi.org/) project sharing platform on Amazon Web Services (AWS).
+
 ## Prerequisites
 
 Before running plumi make sure you have:
@@ -24,18 +25,19 @@ Follow these steps to deploy Plumi on AWS:
 3. to create resources
    ```bash
    pulumi up
-    ```
+   ```
 4. to destroy resources
    ```bash
    pulumi destroy
    ```
 
 ## Configuration
+
 aws and other config settings can be changed from pulumi.dev.yaml file
 
 ## SSL Certificate
 
-To import SSL certificate in aws certificate manager use the following command 
+To import SSL certificate in aws certificate manager use the following command
 
 ```bash
 aws acm import-certificate --profile <aws profile> \
@@ -47,4 +49,4 @@ aws acm import-certificate --profile <aws profile> \
 
 For ongoing maintenance and customization of your Plumi AWS deployment, please refer to the [Plumi documentation](https://plumi.readthedocs.io/en/latest/).
 
-
+hello makrand
